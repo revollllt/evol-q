@@ -96,7 +96,7 @@ def main():
     val_transform = build_transform(model_type)
 
     # Data
-    traindir = os.path.join(args.data, 'train')                                    # @ Victor: 训练集
+    traindir = os.path.join(args.data, 'val')                                      # @ Victor: 训练集   @ Zou: 先使用val替代train用作校准
     valdir = os.path.join(args.data, 'val')                                        # @ Victor: 验证集
 
     val_dataset = datasets.ImageFolder(valdir, val_transform)

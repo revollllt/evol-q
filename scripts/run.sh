@@ -17,7 +17,7 @@ mkdir -p $output_folder
 
 date
 CUDA_VISIBLE_DEVICES=$device python3 main.py \
-    $model ~/ImageNet --ptf \
+    $model ~/data/ImageNet --ptf \
     --mode ${mode} \
     --seed ${seed} \
     --w_bit_type ${w} \

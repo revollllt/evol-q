@@ -233,6 +233,10 @@ def build_transform(model_type, input_size=224,
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
         crop_pct = 0.9
+    elif model_type == 'fastvit':                                                   # @ Zou: fastvit中默认值
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
+        crop_pct = 0.875
     else:
         raise NotImplementedError
     
