@@ -4,13 +4,23 @@ from utils import *
 from models import *
 from joint_evol_opt import JointQuantization
 
+# @Zou ----------------------------------------------------------------------------------#
+from timm.data import (
+    create_dataset,
+    create_loader,
+    resolve_data_config,
+    RealLabelsImagenet,
+)
+# @Zou ----------------------------------------------------------------------------------#
+
 parser = argparse.ArgumentParser(description='CPT-V')
 
 parser.add_argument('model',                                                                                                 # @ Victor: 似乎可以自己加入新模型
                     choices=[                                                                                                # @ Victor: 这里的选项会被 str2model(name) 处理
                         'deit_tiny', 'deit_small', 'deit_base', 'vit_base',
                         'vit_large', 'swin_tiny', 'swin_small', 'swin_base',
-                        'levit_128s', 'levit_128', 'levit_192', 'levit_256', 'levit_384'
+                        'levit_128s', 'levit_128', 'levit_192', 'levit_256', 'levit_384',
+                        'fastvit_sa12'
                     ],
                     help='model')
 parser.add_argument('data', metavar='DIR', help="ImageNet file path")
@@ -36,6 +46,7 @@ parser.add_argument('--num_passes', default=10, type=int, help="number of passes
 parser.add_argument('--num_cycles', default=3, type=int, help="number of cycles per blocks (C)")    # ! 这里原本代码写错了，number of cycles 在论文中不是 K，而应该是 C。已修改
 parser.add_argument('--temp', default=3.0, type=float, help='temperature')
 parser.add_argument('--loss', default='contrastive', choices=['contrastive','mse', 'kl', 'cosine'], help="loss function for evolutionary search's fitness function")
+parser.add_argument('--img_size', default=224, type=int) 
 
 def str2model(name):
     d = {
@@ -52,6 +63,7 @@ def str2model(name):
         'levit_192'  : levit_192,                                                  # @ Victor: 在 levit_quant.py 内所定义
         'levit_256'  : levit_256,                                                  # @ Victor: 在 levit_quant.py 内所定义
         'levit_384'  : levit_384,                                                  # @ Victor: 在 levit_quant.py 内所定义
+        'fastvit_sa12' : fastvit_sa12,                                             # @ Zou: 在 fastvit_quant.py 内所定义
     }
     print('Model: %s' % d[name].__name__)
     return d[name]
@@ -99,13 +111,27 @@ def main():
     traindir = os.path.join(args.data, 'val')                                      # @ Victor: 训练集   @ Zou: 先使用val替代train用作校准
     valdir = os.path.join(args.data, 'val')                                        # @ Victor: 验证集
 
-    val_dataset = datasets.ImageFolder(valdir, val_transform)
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
+    # val_dataset = datasets.ImageFolder(valdir, val_transform)
+    # val_loader = torch.utils.data.DataLoader(
+    #     val_dataset,
+    #     batch_size=args.val_batchsize,
+    #     shuffle=False,
+    #     num_workers=args.num_workers,
+    #     pin_memory=True,
+    # )
+    
+    dataset = create_dataset(                                                       # @ Zou: new val datasetm, the same as fastvit ml-fastvit/validate.py
+        root=args.data,
+        name="",
+        )
+    val_loader = create_loader(
+        dataset,
+        input_size=[3, args.img_size, args.img_size],
         batch_size=args.val_batchsize,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=True,
+        use_prefetcher=True,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+        crop_pct=0.875
     )
     # switch to evaluate mode
     model.eval()                                                                   # @ Victor: 切换到 evaluate 模式
@@ -114,16 +140,26 @@ def main():
     criterion = nn.CrossEntropyLoss().to(device)                                   # @ Victor: 定义交叉熵损失函数并将其移动到指定的设备上
 
     if not args.mode == "fp_no_quant": #check if in a quantization mode            # @ Victor: 如果用 "fp_no_quant" 那就是非量化模式，否则就会进行量化
-        train_dataset = datasets.ImageFolder(traindir, train_transform)
-        _, calib_dataset = torch.utils.data.random_split(train_dataset, [len(train_dataset)-args.calib_size, args.calib_size])  # @ Victor: 从训练集中随机划分出一部分作为校准数据集
-        calib_loader = torch.utils.data.DataLoader(                                # @ Victor: 创建校准数据加载器
-            calib_dataset,                                                         # @ Victor: 需要用到校准数据集
+        # train_dataset = datasets.ImageFolder(traindir, train_transform)
+        _, calib_dataset = torch.utils.data.random_split(dataset, [len(dataset)-args.calib_size, args.calib_size])  # @ Victor: 从训练集中随机划分出一部分作为校准数据集
+        
+        calib_loader = create_loader(                                              # @ Zou: new calib_loader
+            calib_dataset,
+            input_size=[3, args.img_size, args.img_size],
             batch_size=args.calib_batchsize,
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=True,
-            drop_last=True,
+            use_prefetcher=True,
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+            crop_pct=0.875,
         )
+        # calib_loader = torch.utils.data.DataLoader(                                # @ Victor: 创建校准数据加载器
+        #     calib_dataset,                                                         # @ Victor: 需要用到校准数据集
+        #     batch_size=args.calib_batchsize,
+        #     shuffle=False,
+        #     num_workers=args.num_workers,
+        #     pin_memory=True,
+        #     drop_last=True,
+        # )
 
         if args.mode == "fq++" or args.mode == "fq_vit" or args.mode == "e2e":
             
@@ -157,7 +193,7 @@ def main():
             model = optim.opt()                                                                    # @ Victor: 实际运行联合量化
 
             print('Validating Evol-Q optimization...')
-            model.model_quant()                                                    # @ Victor: 打开量化开关。函数定义见 base_quant.py 和 swin_quant.py
+            model.model_quant()                                                    # @ Victor: 打开量化开关。函数定义见 base_quant.py 和 swin_quant.py # @ Zou: new calib dataset
             val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型
                                                     criterion, device)
             with open(args.save_folder+"/evolq.txt", "w") as f:

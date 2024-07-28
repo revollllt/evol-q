@@ -27,6 +27,10 @@ from .utils import load_weights_from_npz, collect_act, hist_act
 from .base_quant import BaseQuant
 # @ Victor: --------------------------------------------------------------------------------- # 
 
+# @ Zou: ------------------------------------------------------------------------------------ # 
+from timm.models import load_checkpoint
+from .fastvit_mobileone_quant import reparameterize_model
+# @ Zou: ------------------------------------------------------------------------------------ #
 
 try:
     from mmseg.models.builder import BACKBONES as seg_BACKBONES
@@ -1046,11 +1050,16 @@ def fastvit_sa12(pretrained=False, **kwargs):
         pos_embs=pos_embs,
         mlp_ratios=mlp_ratios,
         downsamples=downsamples,
+        inference_mode=True,
         **kwargs,
     )
     model.default_cfg = default_cfgs["fastvit_s"]
     if pretrained:
-        raise ValueError("Functionality not implemented.")
+        # raise ValueError("Functionality not implemented.")
+        checkpoint = '/home/zou/codes/ml-fastvit/weights/fastvit_sa12_reparam.pth.tar'
+        load_checkpoint(model, checkpoint)
+        # model.load_state_dict(checkpoint['state_dict'])
+        # model_inf = reparameterize_model(model)
     return model
 
 

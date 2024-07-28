@@ -10,6 +10,19 @@ import random
 import torchvision.transforms.functional as tf
 import torch.nn.functional as F
 from misc import all_reduce_mean
+
+# @Zou: debug ---------------------------------------------------------------------------------------------------------- #
+import matplotlib.pyplot as plt
+import numpy as np
+
+def imshow(img):
+    img = img / 2 + 0.5
+    npimg = img.numpy()
+    npimg = npimg[0]
+    npimg = np.transpose(npimg, (1, 2, 0))
+    plt.imshow(npimg)
+    plt.show()
+# @Zou: debug ---------------------------------------------------------------------------------------------------------- #
 class TwoCropsTransform:
     """Take two random crops of one image"""
 
@@ -148,13 +161,19 @@ def validate(args, val_loader, model, criterion, device):
 
         with torch.no_grad():
             output = model(data)
+            # data_cpu = data.cpu()
+            # imshow(data_cpu)
+            
         loss = criterion(output, target)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+        # print(f'acc1: {prec1}  acc5: {prec5}  loss: {loss}')
+        # break
         losses.update(loss.data.item(), data.size(0))
         top1.update(prec1.data.item(), data.size(0))
         top5.update(prec5.data.item(), data.size(0))
+        # print(f'top1: {top1.val:.3f} ({top1.avg:.3f})  top5: {top5.val:.3f} ({top5.avg:.3f}')
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -205,6 +224,7 @@ def accuracy(output, target, topk=(1, )):
     batch_size = target.size(0)
 
     _, pred = output.topk(maxk, 1, True, True)
+    # print(pred, target)
     pred = pred.t()
     correct = pred.eq(target.reshape(1, -1).expand_as(pred))
 
