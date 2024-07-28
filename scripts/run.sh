@@ -3,9 +3,9 @@
 device=0            # CUDA device
 seed=0              # random seed
 model="deit_tiny"   # model flavor
-# model="fastvit_sa12"
+model="fastvit_sa12"
 mode="e2e"          # mode from main.py
-mode="fp_no_quant"
+# mode="fp_no_quant"
 
 # specify # of bits for weights & activations ex: 3,4,8
 weight=4
@@ -21,7 +21,7 @@ date
 CUDA_VISIBLE_DEVICES=$device python3 main.py \
     $model ~/data/ImageNet --ptf \
     --mode ${mode} \
-    --img_size 224 \
+    --img_size 256 \
     --seed ${seed} \
     --w_bit_type ${w} \
     --a_bit_type ${a} \

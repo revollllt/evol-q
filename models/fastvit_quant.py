@@ -356,7 +356,7 @@ class RepMixer(nn.Module):
         self.inference_mode = inference_mode
 
         if inference_mode:
-            self.reparam_conv = nn.Conv2d(                                    # ! Should be changed here
+            self.reparam_conv = QConv2d(                                    # ! Should be changed here
                 in_channels=self.dim,
                 out_channels=self.dim,
                 kernel_size=self.kernel_size,
@@ -364,7 +364,20 @@ class RepMixer(nn.Module):
                 padding=self.kernel_size // 2,
                 groups=self.dim,
                 bias=True,
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_W,
+                calibration_mode=cfg.CALIBRATION_MODE_W,
+                observer_str=cfg.OBSERVER_W,
+                quantizer_str=cfg.QUANTIZER_W,
+                bcorr_weights=cfg.BCORR_W
             )
+            self.qact = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         else:
             self.norm = MobileOneBlock(                                       # ! Should be changed here
                 dim,
@@ -395,10 +408,11 @@ class RepMixer(nn.Module):
                 self.layer_scale = nn.Parameter(
                     layer_scale_init_value * torch.ones((dim, 1, 1)), requires_grad=True
                 )
-
+            
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if hasattr(self, "reparam_conv"):
             x = self.reparam_conv(x)
+            x = self.qact(x)
             return x
         else:
             if self.use_layer_scale:
@@ -462,6 +476,9 @@ class ConvFFN(nn.Module):
         out_channels: Optional[int] = None,
         act_layer: nn.Module = nn.GELU,
         drop: float = 0.0,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Build convolutional FFN module.
 
@@ -478,19 +495,58 @@ class ConvFFN(nn.Module):
         self.conv = nn.Sequential()
         self.conv.add_module(
             "conv",
-            nn.Conv2d(
+            QConv2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=7,
                 padding=3,
                 groups=in_channels,
                 bias=False,
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_W,
+                calibration_mode=cfg.CALIBRATION_MODE_W,
+                observer_str=cfg.OBSERVER_W,
+                quantizer_str=cfg.QUANTIZER_W,
+                bcorr_weights=cfg.BCORR_W
             ),
         )
+        self.qact1 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         self.conv.add_module("bn", nn.BatchNorm2d(num_features=out_channels))
-        self.fc1 = nn.Conv2d(in_channels, hidden_channels, kernel_size=1)
+        self.fc1 = QConv2d(in_channels, hidden_channels, kernel_size=1,
+                            quant=quant,
+                            calibrate=calibrate,
+                            bit_type=cfg.BIT_TYPE_W,
+                            calibration_mode=cfg.CALIBRATION_MODE_W,
+                            observer_str=cfg.OBSERVER_W,
+                            quantizer_str=cfg.QUANTIZER_W,
+                            bcorr_weights=cfg.BCORR_W)
         self.act = act_layer()
-        self.fc2 = nn.Conv2d(hidden_channels, out_channels, kernel_size=1)
+        self.qact2 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.fc2 = QConv2d(hidden_channels, out_channels, kernel_size=1,
+                            quant=quant,
+                            calibrate=calibrate,
+                            bit_type=cfg.BIT_TYPE_W,
+                            calibration_mode=cfg.CALIBRATION_MODE_W,
+                            observer_str=cfg.OBSERVER_W,
+                            quantizer_str=cfg.QUANTIZER_W,
+                            bcorr_weights=cfg.BCORR_W)
+        self.qact3 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         self.drop = nn.Dropout(drop)
         self.apply(self._init_weights)
 
@@ -502,10 +558,13 @@ class ConvFFN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
+        x = self.qact1(x)
         x = self.fc1(x)
         x = self.act(x)
+        x = self.qact2(x)
         x = self.drop(x)
         x = self.fc2(x)
+        x = self.qact3(x)
         x = self.drop(x)
         return x
 
@@ -642,6 +701,9 @@ class RepMixerBlock(nn.Module):
         use_layer_scale: bool = True,
         layer_scale_init_value: float = 1e-5,
         inference_mode: bool = False,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ):
         """Build RepMixer Block.
 
@@ -665,6 +727,9 @@ class RepMixerBlock(nn.Module):
             use_layer_scale=use_layer_scale,
             layer_scale_init_value=layer_scale_init_value,
             inference_mode=inference_mode,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         )
 
         assert mlp_ratio > 0, "MLP ratio should be greater than 0, found: {}".format(
@@ -676,8 +741,23 @@ class RepMixerBlock(nn.Module):
             hidden_channels=mlp_hidden_dim,
             act_layer=act_layer,
             drop=drop,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         )
 
+        self.qact1 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact2 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         # Drop Path
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
@@ -691,10 +771,14 @@ class RepMixerBlock(nn.Module):
     def forward(self, x):
         if self.use_layer_scale:
             x = self.token_mixer(x)
+            x = self.qact1(x)
             x = x + self.drop_path(self.layer_scale * self.convffn(x))
+            x = self.qact2(x)
         else:
             x = self.token_mixer(x)
+            x = self.qact1(x)
             x = x + self.drop_path(self.convffn(x))
+            x = self.qact2(x)
         return x
 
 
@@ -746,8 +830,28 @@ class AttentionBlock(nn.Module):
             hidden_channels=mlp_hidden_dim,
             act_layer=act_layer,
             drop=drop,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         )
-
+        self.qact1 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact2 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact3 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         # Drop path
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
@@ -763,11 +867,15 @@ class AttentionBlock(nn.Module):
 
     def forward(self, x):
         if self.use_layer_scale:
-            x = x + self.drop_path(self.layer_scale_1 * self.token_mixer(self.norm(x)))
+            x = x + self.drop_path(self.layer_scale_1 * self.token_mixer(self.qact1(self.norm(x))))
+            x = self.qact2(x)
             x = x + self.drop_path(self.layer_scale_2 * self.convffn(x))
+            x = self.qact3(x)
         else:
-            x = x + self.drop_path(self.token_mixer(self.norm(x)))
+            x = x + self.drop_path(self.token_mixer(self.qact1(self.norm(x))))
+            x = self.qact2(x)
             x = x + self.drop_path(self.convffn(x))
+            x = self.qact3(x)
         return x
 
 
@@ -828,6 +936,9 @@ def basic_blocks(
                     use_layer_scale=use_layer_scale,
                     layer_scale_init_value=layer_scale_init_value,
                     inference_mode=inference_mode,
+                    quant=quant,
+                    calibrate=calibrate,
+                    cfg=cfg
                 )
             )
         elif token_mixer_type == "attention":
@@ -902,6 +1013,12 @@ class FastViT(BaseQuant):
         # Convolutional stem
         self.patch_embed = convolutional_stem(3, embed_dims[0], inference_mode,                 # @ Zou: already update MoblieOneNet
                                               quant=quant, calibrate=calibrate, cfg=cfg)
+        self.qact_embed = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
 
         # Build the main stages of the network architecture
         network = []
@@ -984,10 +1101,23 @@ class FastViT(BaseQuant):
                 cfg=cfg
             )
             self.head = (
-                nn.Linear(int(embed_dims[-1] * cls_ratio), num_classes)
+                QLinear(int(embed_dims[-1] * cls_ratio), num_classes,
+                        quant=quant,
+                        calibrate=calibrate,
+                        bit_type=cfg.BIT_TYPE_W,
+                        calibration_mode=cfg.CALIBRATION_MODE_W,
+                        observer_str=cfg.OBSERVER_W,
+                        quantizer_str=cfg.QUANTIZER_W,
+                        bcorr_weights=cfg.BCORR_W)
                 if num_classes > 0
                 else nn.Identity()
             )
+            self.qact_out = QAct(quant=quant,
+                                calibrate=calibrate,
+                                bit_type=cfg.BIT_TYPE_A,
+                                calibration_mode=cfg.CALIBRATION_MODE_A,
+                                observer_str=cfg.OBSERVER_A,
+                                quantizer_str=cfg.QUANTIZER_A)
 
         self.apply(self.cls_init_weights)
         self.init_cfg = copy.deepcopy(init_cfg)
@@ -1051,6 +1181,7 @@ class FastViT(BaseQuant):
 
     def forward_embeddings(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
+        x = self.qact_embed(x)
         return x
 
     def forward_tokens(self, x: torch.Tensor) -> torch.Tensor:
@@ -1080,6 +1211,7 @@ class FastViT(BaseQuant):
         x = self.gap(x)
         x = x.view(x.size(0), -1)
         cls_out = self.head(x)
+        cls_out = self.qact_out(cls_out)
         return cls_out
 
 
