@@ -2,6 +2,7 @@
 from models.levit_quant import Attention, AttentionSubsample
 from models.vit_quant import Attention_ViT
 from models.swin_quant import WindowAttention
+from models.fastvit_quant import MHSA
 import numpy as np
 from models import *
 import torch
@@ -130,7 +131,7 @@ class JointQuantization:
         
         attn_modules = []
         for m in self.inf_model.modules():
-            if type(m) in [Attention, AttentionSubsample, Attention_ViT]:             # @ Victor: 来自于 vit_quant 和 levit_quant
+            if type(m) in [Attention, AttentionSubsample, Attention_ViT, MHSA]:             # @ Victor: 来自于 vit_quant 和 levit_quant  # @ Zou: fastvit中需要有attn_modules
                 attn_modules.append(m)
                 m.inputs = []
                 m.outputs = []
@@ -164,7 +165,7 @@ class JointQuantization:
                 m_name = m.__class__.__name__
                 print("module: ", m_name, str(j))
 
-                if type(m) in [Attention_ViT, WindowAttention]:
+                if type(m) in [Attention_ViT, WindowAttention, MHSA]:
                     self.bits = m.proj.quantizer.bit_type.bits
                 elif type(m) in [Attention, AttentionSubsample]:
                     self.bits = m.proj[1].quantizer.bit_type.bits

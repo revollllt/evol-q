@@ -76,7 +76,8 @@ default_cfgs = {
 
 
 def convolutional_stem(
-    in_channels: int, out_channels: int, inference_mode: bool = False
+    in_channels: int, out_channels: int, inference_mode: bool = False,
+    quant=False, calibrate=False, cfg=None
 ) -> nn.Sequential:
     """Build convolutional stem with MobileOne blocks.
 
@@ -99,6 +100,9 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         ),
         MobileOneBlock(                                    # ! Should be changed here
             in_channels=out_channels,
@@ -110,6 +114,9 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         ),
         MobileOneBlock(                                    # ! Should be changed here
             in_channels=out_channels,
@@ -121,6 +128,9 @@ def convolutional_stem(
             inference_mode=inference_mode,
             use_se=False,
             num_conv_branches=1,
+            quant=quant,
+            calibrate=calibrate,
+            cfg=cfg
         ),
     )
 
@@ -139,6 +149,9 @@ class MHSA(nn.Module):                                    # ! Should be changed 
         qkv_bias: bool = False,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Build MHSA module that can handle 3D or 4D input tensors.
 
@@ -155,19 +168,79 @@ class MHSA(nn.Module):                                    # ! Should be changed 
         self.num_heads = dim // head_dim
         self.scale = head_dim**-0.5
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        # self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.qkv = QLinear(
+            dim,
+            dim * 3,
+            bias=qkv_bias,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+            bcorr_weights=cfg.BCORR_W
+        )
+        self.qact1 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact2 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
+        self.qact3 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
+        # self.proj = nn.Linear(dim, dim)
+        self.proj = QLinear(
+            dim,
+            dim,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+            bcorr_weights=cfg.BCORR_W
+        )
+        self.qact4 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         self.proj_drop = nn.Dropout(proj_drop)
+        
+        self.log_int_softmax = QIntSoftmax(
+            log_i_softmax=cfg.INT_SOFTMAX,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_S,
+            calibration_mode=cfg.CALIBRATION_MODE_S,
+            observer_str=cfg.OBSERVER_S,
+            quantizer_str=cfg.QUANTIZER_S)
+        
+        self.handle = self.register_forward_hook(collect_act)
+        self.inputs = []
+        self.outputs = []
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:           # @ Zou: 每个linear或者conv后加上一个qact
         shape = x.shape
         B, C, H, W = shape
         N = H * W
         if len(shape) == 4:
             x = torch.flatten(x, start_dim=2).transpose(-2, -1)  # (B, N, C)
         qkv = (
-            self.qkv(x)
+            self.qact1(self.qkv(x))
             .reshape(B, N, 3, self.num_heads, self.head_dim)
             .permute(2, 0, 3, 1, 4)
         )
@@ -175,11 +248,15 @@ class MHSA(nn.Module):                                    # ! Should be changed 
 
         # trick here to make q@k.t more stable
         attn = (q * self.scale) @ k.transpose(-2, -1)
-        attn = attn.softmax(dim=-1)
+        attn = self.qact2(attn)
+        # attn = attn.softmax(dim=-1)                     # @ Zou: 此处的softmax还没进行量化
+        attn = self.log_int_softmax(attn, self.qact2.quantizer.scale)    # @ Zou: 目前还没看这里的softmax是如何量化的
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.qact3(x)
         x = self.proj(x)
+        x = self.qact4(x)
         x = self.proj_drop(x)
         if len(shape) == 4:
             x = x.transpose(-2, -1).reshape(B, C, H, W)
@@ -187,7 +264,7 @@ class MHSA(nn.Module):                                    # ! Should be changed 
         return x
 
 
-class PatchEmbed(nn.Module):
+class PatchEmbed(nn.Module):                            # @ Zou: already quant
     """Convolutional patch embedding layer."""
 
     def __init__(
@@ -197,6 +274,9 @@ class PatchEmbed(nn.Module):
         in_channels: int,
         embed_dim: int,
         inference_mode: bool = False,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Build patch embedding layer.
 
@@ -231,6 +311,9 @@ class PatchEmbed(nn.Module):
                 inference_mode=inference_mode,
                 use_se=False,
                 num_conv_branches=1,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
         )
         self.proj = nn.Sequential(*block)
@@ -254,6 +337,9 @@ class RepMixer(nn.Module):
         use_layer_scale=True,
         layer_scale_init_value=1e-5,
         inference_mode: bool = False,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ):
         """Build RepMixer Module.
 
@@ -289,6 +375,9 @@ class RepMixer(nn.Module):
                 use_act=False,
                 use_scale_branch=False,
                 num_conv_branches=0,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
             self.mixer = MobileOneBlock(                                     # ! Should be changed here
                 dim,
@@ -297,6 +386,9 @@ class RepMixer(nn.Module):
                 padding=kernel_size // 2,
                 groups=dim,
                 use_act=False,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
             self.use_layer_scale = use_layer_scale
             if use_layer_scale:
@@ -623,6 +715,9 @@ class AttentionBlock(nn.Module):
         drop_path: float = 0.0,
         use_layer_scale: bool = True,
         layer_scale_init_value: float = 1e-5,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ):
         """Build Attention Block.
 
@@ -640,7 +735,7 @@ class AttentionBlock(nn.Module):
         super().__init__()
 
         self.norm = norm_layer(dim)
-        self.token_mixer = MHSA(dim=dim)
+        self.token_mixer = MHSA(dim=dim, quant=quant, calibrate=calibrate, cfg=cfg)
 
         assert mlp_ratio > 0, "MLP ratio should be greater than 0, found: {}".format(
             mlp_ratio
@@ -690,6 +785,9 @@ def basic_blocks(
     use_layer_scale: bool = True,
     layer_scale_init_value: float = 1e-5,
     inference_mode=False,
+    quant=False,
+    calibrate=False,
+    cfg=None
 ) -> nn.Sequential:
     """Build FastViT blocks within a stage.
 
@@ -743,6 +841,9 @@ def basic_blocks(
                     drop_path=block_dpr,
                     use_layer_scale=use_layer_scale,
                     layer_scale_init_value=layer_scale_init_value,
+                    quant=quant,
+                    calibrate=calibrate,
+                    cfg=cfg
                 )
             )
         else:
@@ -754,7 +855,7 @@ def basic_blocks(
     return blocks
 
 
-class FastViT(nn.Module):
+class FastViT(BaseQuant):
     """
     This class implements `FastViT architecture <https://arxiv.org/pdf/2303.14189.pdf>`_
     """
@@ -782,10 +883,14 @@ class FastViT(nn.Module):
         pretrained=None,
         cls_ratio=2.0,
         inference_mode=False,
+        quant=False,
+        calibrate=False,
+        cfg=None,
         **kwargs,
     ) -> None:
 
         super().__init__()
+        self.cfg = cfg                                  # @ Zou: 
 
         if not fork_feat:
             self.num_classes = num_classes
@@ -795,7 +900,8 @@ class FastViT(nn.Module):
             pos_embs = [None] * len(layers)
 
         # Convolutional stem
-        self.patch_embed = convolutional_stem(3, embed_dims[0], inference_mode)
+        self.patch_embed = convolutional_stem(3, embed_dims[0], inference_mode,                 # @ Zou: already update MoblieOneNet
+                                              quant=quant, calibrate=calibrate, cfg=cfg)
 
         # Build the main stages of the network architecture
         network = []
@@ -821,6 +927,9 @@ class FastViT(nn.Module):
                 use_layer_scale=use_layer_scale,
                 layer_scale_init_value=layer_scale_init_value,
                 inference_mode=inference_mode,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
             network.append(stage)
             if i >= len(layers) - 1:
@@ -829,12 +938,15 @@ class FastViT(nn.Module):
             # Patch merging/downsampling between stages.
             if downsamples[i] or embed_dims[i] != embed_dims[i + 1]:
                 network.append(
-                    PatchEmbed(
+                    PatchEmbed(                             # @ Zou: already quant
                         patch_size=down_patch_size,
                         stride=down_stride,
                         in_channels=embed_dims[i],
                         embed_dim=embed_dims[i + 1],
                         inference_mode=inference_mode,
+                        quant=quant,
+                        calibrate=calibrate,
+                        cfg=cfg
                     )
                 )
 
@@ -857,7 +969,7 @@ class FastViT(nn.Module):
         else:
             # Classifier head
             self.gap = nn.AdaptiveAvgPool2d(output_size=1)
-            self.conv_exp = MobileOneBlock(
+            self.conv_exp = MobileOneBlock(                 # @ Zou: already quant
                 in_channels=embed_dims[-1],
                 out_channels=int(embed_dims[-1] * cls_ratio),
                 kernel_size=3,
@@ -867,6 +979,9 @@ class FastViT(nn.Module):
                 inference_mode=inference_mode,
                 use_se=True,
                 num_conv_branches=1,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
             self.head = (
                 nn.Linear(int(embed_dims[-1] * cls_ratio), num_classes)
@@ -1033,9 +1148,9 @@ def fastvit_s12(pretrained=False, **kwargs):
         raise ValueError("Functionality not implemented.")
     return model
 
-
+# @ Zou: select fastvit_sa12 as an example
 @register_model
-def fastvit_sa12(pretrained=False, **kwargs):
+def fastvit_sa12(pretrained=False, quant=False, calibrate=False, cfg=None, **kwargs):
     """Instantiate FastViT-SA12 model variant."""
     layers = [2, 2, 6, 2]
     embed_dims = [64, 128, 256, 512]
@@ -1051,6 +1166,9 @@ def fastvit_sa12(pretrained=False, **kwargs):
         mlp_ratios=mlp_ratios,
         downsamples=downsamples,
         inference_mode=True,
+        quant=quant,
+        calibrate=calibrate,
+        cfg=cfg,
         **kwargs,
     )
     model.default_cfg = default_cfgs["fastvit_s"]

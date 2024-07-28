@@ -5,7 +5,7 @@ seed=0              # random seed
 model="deit_tiny"   # model flavor
 # model="fastvit_sa12"
 mode="e2e"          # mode from main.py
-# mode="fp_no_quant"
+mode="fp_no_quant"
 
 # specify # of bits for weights & activations ex: 3,4,8
 weight=4
@@ -28,7 +28,7 @@ CUDA_VISIBLE_DEVICES=$device python3 main.py \
     --quant-method omse \
     --bias-corr \
     --save_folder $output_folder \
-    --val-batchsize 16 \
+    --val-batchsize 8 \
     2>&1 | tee -a $out_file # append to output folder
 
 date

@@ -45,3 +45,5 @@ This script contains details for how to quantize 3,4,8-bit models as well as mod
 | LeViT-246  |                   |                     |
 | LeViT-384  |                   |                     |
 |fastvit-sa12|      81.564       |                     |
+
+

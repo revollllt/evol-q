@@ -37,7 +37,7 @@ class Config:
             self.BIT_TYPE_S = BIT_TYPE_DICT['uint8']
             self.OBSERVER_S = self.OBSERVER_A
             self.QUANTIZER_S = self.QUANTIZER_A
-        if args.ptf:
+        if args.ptf:                       # @ Zou: 是否使用power of two activation
             self.INT_NORM = True
             self.OBSERVER_A_LN = 'ptf'
             self.CALIBRATION_MODE_A_LN = 'channel_wise'

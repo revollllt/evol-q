@@ -9,6 +9,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# @ Zou: --------------------------------------------------------------------------------- # 
+from .layers_quant import *
+from .ptq import QAct, QConv2d, QIntSoftmax, QLinear, QIntLayerNorm
+# @ Zou: --------------------------------------------------------------------------------- # 
+
 __all__ = ["MobileOneBlock", "reparameterize_model"]
 
 
@@ -79,6 +84,9 @@ class MobileOneBlock(nn.Module):
         use_scale_branch: bool = True,
         num_conv_branches: int = 1,
         activation: nn.Module = nn.GELU(),
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Construct a MobileOneBlock module.
 
@@ -119,7 +127,17 @@ class MobileOneBlock(nn.Module):
             self.activation = nn.Identity()
 
         if inference_mode:
-            self.reparam_conv = nn.Conv2d(
+            # self.reparam_conv = nn.Conv2d(
+            #     in_channels=in_channels,
+            #     out_channels=out_channels,
+            #     kernel_size=kernel_size,
+            #     stride=stride,
+            #     padding=padding,
+            #     dilation=dilation,
+            #     groups=groups,
+            #     bias=True,
+            # )
+            self.reparam_conv = QConv2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
@@ -128,6 +146,21 @@ class MobileOneBlock(nn.Module):
                 dilation=dilation,
                 groups=groups,
                 bias=True,
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_W,
+                calibration_mode=cfg.CALIBRATION_MODE_W,
+                observer_str=cfg.OBSERVER_W,
+                quantizer_str=cfg.QUANTIZER_W,
+                bcorr_weights=cfg.BCORR_W
+            )
+            self.qact = QAct(
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_A,
+                calibration_mode=cfg.CALIBRATION_MODE_A,
+                observer_str=cfg.OBSERVER_A,
+                quantizer_str=cfg.QUANTIZER_A
             )
         else:
             # Re-parameterizable skip connection
@@ -157,7 +190,10 @@ class MobileOneBlock(nn.Module):
         """Apply forward pass."""
         # Inference mode forward pass.
         if self.inference_mode:
-            return self.activation(self.se(self.reparam_conv(x)))
+            # return self.activation(self.se(self.reparam_conv(x)))
+            x = self.activation(self.se(self.reparam_conv(x)))
+            x = self.qact(x)
+            return x
 
         # Multi-branched train-time forward pass.
         # Skip branch output
