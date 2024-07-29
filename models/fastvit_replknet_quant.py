@@ -7,6 +7,8 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
+from .ptq import QAct, QConv2d, QIntSoftmax, QLinear, QIntLayerNorm
+
 __all__ = ["ReparamLargeKernelConv"]
 
 
@@ -29,6 +31,9 @@ class ReparamLargeKernelConv(nn.Module):
         small_kernel: int,
         inference_mode: bool = False,
         activation: nn.Module = nn.GELU(),
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Construct a ReparamLargeKernelConv module.
 
@@ -54,7 +59,17 @@ class ReparamLargeKernelConv(nn.Module):
         self.small_kernel = small_kernel
         self.padding = kernel_size // 2
         if inference_mode:
-            self.lkb_reparam = nn.Conv2d(        # @ Victor: check this. The core of ReparamLargeKernelConv
+            # self.lkb_reparam = nn.Conv2d(        # @ Victor: check this. The core of ReparamLargeKernelConv
+            #     in_channels=in_channels,
+            #     out_channels=out_channels,
+            #     kernel_size=kernel_size,
+            #     stride=stride,
+            #     padding=self.padding,
+            #     dilation=1,
+            #     groups=groups,
+            #     bias=True,
+            # )
+            self.lkb_reparam = QConv2d(        # @ Victor: check this. The core of ReparamLargeKernelConv
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
@@ -63,7 +78,14 @@ class ReparamLargeKernelConv(nn.Module):
                 dilation=1,
                 groups=groups,
                 bias=True,
-            )
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_W,
+                calibration_mode=cfg.CALIBRATION_MODE_W,
+                observer_str=cfg.OBSERVER_W,
+                quantizer_str=cfg.QUANTIZER_W,
+                bcorr_weights=cfg.BCORR_W
+            )            
         else:
             self.lkb_origin = self._conv_bn(
                 kernel_size=kernel_size, padding=self.padding
@@ -75,6 +97,12 @@ class ReparamLargeKernelConv(nn.Module):
                 self.small_conv = self._conv_bn(
                     kernel_size=small_kernel, padding=small_kernel // 2
                 )
+        self.qact = self.qact = QAct(quant=quant,
+                            calibrate=calibrate,
+                            bit_type=cfg.BIT_TYPE_A,
+                            calibration_mode=cfg.CALIBRATION_MODE_A,
+                            observer_str=cfg.OBSERVER_A,
+                            quantizer_str=cfg.QUANTIZER_A)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply forward pass."""
@@ -86,6 +114,7 @@ class ReparamLargeKernelConv(nn.Module):
                 out += self.small_conv(x)
 
         self.activation(out)
+        out = self.qact(out)
         return out
 
     def get_kernel_bias(self) -> Tuple[torch.Tensor, torch.Tensor]:

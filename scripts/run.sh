@@ -8,7 +8,7 @@ mode="e2e"          # mode from main.py
 # mode="fp_no_quant"
 
 # specify # of bits for weights & activations ex: 3,4,8
-weight=4
+weight=8
 w=uint${weight}
 a=uint8
 

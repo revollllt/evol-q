@@ -179,11 +179,13 @@ def main():
             torch.save(model, args.save_folder+ "/model_layerwise.pt")             # @ Victor: 保存校准后的模型
             model.model_quant()                                                    # @ Victor: 函数定义见 base_quant.py 和 swin_quant.py
 
-            print('Validating layerwise quantization...')
-            val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型
-                                                    criterion, device)
-            with open(args.save_folder+"/layerwise.txt", "a") as f:
-                f.write(str(val_prec1)+"\n")
+            # model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")             # @ Zou: 重新load model_layerwise.pt参数，否则fastvit_quant的validate会出现time变大同时out of memory
+            # model = model.to(device)
+            # print('Validating layerwise quantization...')
+            # val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
+            #                                         criterion, device)
+            # with open(args.save_folder+"/layerwise.txt", "a") as f:
+            #     f.write(str(val_prec1)+"\n")
                 
         if args.mode == "evolq" or args.mode == "e2e":
 

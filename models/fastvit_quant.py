@@ -298,6 +298,9 @@ class PatchEmbed(nn.Module):                            # @ Zou: already quant
                 groups=in_channels,
                 small_kernel=3,
                 inference_mode=inference_mode,
+                quant=quant,
+                calibrate=calibrate,
+                cfg=cfg
             )
         )
         block.append(
@@ -584,6 +587,9 @@ class RepCPE(nn.Module):
         embed_dim: int = 768,
         spatial_shape: Union[int, Tuple[int, int]] = (7, 7),
         inference_mode=False,
+        quant=False,
+        calibrate=False,
+        cfg=None
     ) -> None:
         """Build reparameterizable conditional positional encoding
 
@@ -611,7 +617,16 @@ class RepCPE(nn.Module):
         self.groups = embed_dim
 
         if inference_mode:
-            self.reparam_conv = nn.Conv2d(
+            # self.reparam_conv = nn.Conv2d(
+            #     in_channels=self.in_channels,
+            #     out_channels=self.embed_dim,
+            #     kernel_size=self.spatial_shape,
+            #     stride=1,
+            #     padding=int(self.spatial_shape[0] // 2),
+            #     groups=self.embed_dim,
+            #     bias=True,
+            # )
+            self.reparam_conv = QConv2d(
                 in_channels=self.in_channels,
                 out_channels=self.embed_dim,
                 kernel_size=self.spatial_shape,
@@ -619,7 +634,23 @@ class RepCPE(nn.Module):
                 padding=int(self.spatial_shape[0] // 2),
                 groups=self.embed_dim,
                 bias=True,
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_W,
+                calibration_mode=cfg.CALIBRATION_MODE_W,
+                observer_str=cfg.OBSERVER_W,
+                quantizer_str=cfg.QUANTIZER_W,
+                bcorr_weights=cfg.BCORR_W
             )
+            self.qact = QAct(
+                quant=quant,
+                calibrate=calibrate,
+                bit_type=cfg.BIT_TYPE_A,
+                calibration_mode=cfg.CALIBRATION_MODE_A,
+                observer_str=cfg.OBSERVER_A,
+                quantizer_str=cfg.QUANTIZER_A
+            )
+            
         else:
             self.pe = nn.Conv2d(
                 in_channels,
@@ -634,6 +665,7 @@ class RepCPE(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if hasattr(self, "reparam_conv"):
             x = self.reparam_conv(x)
+            x = self.qact(x)
             return x
         else:
             x = self.pe(x) + x
@@ -852,6 +884,12 @@ class AttentionBlock(nn.Module):
                           calibration_mode=cfg.CALIBRATION_MODE_A,
                           observer_str=cfg.OBSERVER_A,
                           quantizer_str=cfg.QUANTIZER_A)
+        self.qact4 = QAct(quant=quant,
+                          calibrate=calibrate,
+                          bit_type=cfg.BIT_TYPE_A,
+                          calibration_mode=cfg.CALIBRATION_MODE_A,
+                          observer_str=cfg.OBSERVER_A,
+                          quantizer_str=cfg.QUANTIZER_A)
         # Drop path
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
@@ -867,15 +905,15 @@ class AttentionBlock(nn.Module):
 
     def forward(self, x):
         if self.use_layer_scale:
-            x = x + self.drop_path(self.layer_scale_1 * self.token_mixer(self.qact1(self.norm(x))))
-            x = self.qact2(x)
+            x = x + self.drop_path(self.qact2(self.layer_scale_1 * self.token_mixer(self.qact1(self.norm(x)))))
+            x = self.qact3(x)
             x = x + self.drop_path(self.layer_scale_2 * self.convffn(x))
-            x = self.qact3(x)
+            x = self.qact4(x)
         else:
-            x = x + self.drop_path(self.token_mixer(self.qact1(self.norm(x))))
-            x = self.qact2(x)
-            x = x + self.drop_path(self.convffn(x))
+            x = x + self.drop_path(self.qact2(self.token_mixer(self.qact1(self.norm(x)))))
             x = self.qact3(x)
+            x = x + self.drop_path(self.convffn(x))
+            x = self.qact4(x)
         return x
 
 
@@ -1027,7 +1065,8 @@ class FastViT(BaseQuant):
             if pos_embs[i] is not None:
                 network.append(
                     pos_embs[i](
-                        embed_dims[i], embed_dims[i], inference_mode=inference_mode
+                        embed_dims[i], embed_dims[i], inference_mode=inference_mode,
+                        quant=quant, calibrate=calibrate, cfg=cfg
                     )
                 )
             stage = basic_blocks(
