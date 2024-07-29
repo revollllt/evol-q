@@ -10,6 +10,7 @@ import random
 import torchvision.transforms.functional as tf
 import torch.nn.functional as F
 from misc import all_reduce_mean
+from tqdm import tqdm
 
 # @Zou: debug ---------------------------------------------------------------------------------------------------------- #
 import matplotlib.pyplot as plt
@@ -155,7 +156,8 @@ def validate(args, val_loader, model, criterion, device):
     model.eval()
 
     val_start_time = end = time.time()
-    for i, (data, target) in enumerate(val_loader):
+    loop = tqdm(enumerate(val_loader), leave=True, total=len(val_loader))
+    for i, (data, target) in loop:
         data = data.to(device)
         target = target.to(device)
 
@@ -179,19 +181,30 @@ def validate(args, val_loader, model, criterion, device):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                  'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                      i,
-                      len(val_loader),
-                      batch_time=batch_time,
-                      loss=losses,
-                      top1=top1,
-                      top5=top5,
-                  ))
+        loop.set_description('Test: ')
+        loop.set_postfix_str('Time {batch_time.val:.3f} ({batch_time.avg:.3f})   '
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})   '
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})   '
+                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})   '
+                            'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                                batch_time=batch_time,
+                                loss=losses,
+                                top1=top1,
+                                top5=top5,
+                            ))
+        # if i % args.print_freq == 0:
+        #     print('Test: [{0}/{1}]\t'
+        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+        #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+        #           'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+        #           'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+        #               i,
+        #               len(val_loader),
+        #               batch_time=batch_time,
+        #               loss=losses,
+        #               top1=top1,
+        #               top5=top5,
+        #           ))
     val_end_time = time.time()
     print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Time {time:.3f}'.
           format(top1=top1, top5=top5, time=val_end_time - val_start_time))

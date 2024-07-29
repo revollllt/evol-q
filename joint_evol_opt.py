@@ -163,7 +163,7 @@ class JointQuantization:
                 init = self.get_scales()
 
                 m_name = m.__class__.__name__
-                print("module: ", m_name, str(j))
+                print(f"Total Passes: {self.args.num_passes} Current Passes: {i+1} ", "module: ", m_name, str(j))
 
                 if type(m) in [Attention_ViT, WindowAttention, MHSA]:
                     self.bits = m.proj.quantizer.bit_type.bits
