@@ -181,9 +181,8 @@ def validate(args, val_loader, model, criterion, device):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        loop.set_description('Test: ')
+        loop.set_description('Test ')
         loop.set_postfix_str('Time {batch_time.val:.3f} ({batch_time.avg:.3f})   '
-                            'Loss {loss.val:.4f} ({loss.avg:.4f})   '
                             'Loss {loss.val:.4f} ({loss.avg:.4f})   '
                             'Prec@1 {top1.val:.3f} ({top1.avg:.3f})   '
                             'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(

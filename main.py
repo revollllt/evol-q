@@ -47,6 +47,7 @@ parser.add_argument('--num_cycles', default=3, type=int, help="number of cycles 
 parser.add_argument('--temp', default=3.0, type=float, help='temperature')
 parser.add_argument('--loss', default='contrastive', choices=['contrastive','mse', 'kl', 'cosine'], help="loss function for evolutionary search's fitness function")
 parser.add_argument('--img_size', default=224, type=int) 
+# parser.add_argument('--envs', default="server", choices=['server', 'mypc'])
 
 def str2model(name):
     d = {
@@ -128,17 +129,18 @@ def main():
         dataset,
         input_size=[3, args.img_size, args.img_size],
         batch_size=args.val_batchsize,
-        use_prefetcher=True,
+        use_prefetcher=False,
         mean=(0.485, 0.456, 0.406),
         std=(0.229, 0.224, 0.225),
-        crop_pct=0.875
+        crop_pct=0.875,
+        pin_memory=True
     )
     # switch to evaluate mode
     model.eval()                                                                   # @ Victor: 切换到 evaluate 模式
 
     # define loss function (criterion)
-    criterion = nn.CrossEntropyLoss().to(device)                                   # @ Victor: 定义交叉熵损失函数并将其移动到指定的设备上
-
+    # criterion = nn.CrossEntropyLoss().to(device)                                   # @ Victor: 定义交叉熵损失函数并将其移动到指定的设备上
+    criterion = nn.CrossEntropyLoss()
     if not args.mode == "fp_no_quant": #check if in a quantization mode            # @ Victor: 如果用 "fp_no_quant" 那就是非量化模式，否则就会进行量化
         # train_dataset = datasets.ImageFolder(traindir, train_transform)
         _, calib_dataset = torch.utils.data.random_split(dataset, [len(dataset)-args.calib_size, args.calib_size])  # @ Victor: 从训练集中随机划分出一部分作为校准数据集
@@ -151,6 +153,7 @@ def main():
             mean=(0.485, 0.456, 0.406),
             std=(0.229, 0.224, 0.225),
             crop_pct=0.875,
+            pin_memory=True
         )
         # calib_loader = torch.utils.data.DataLoader(                                # @ Victor: 创建校准数据加载器
         #     calib_dataset,                                                         # @ Victor: 需要用到校准数据集
@@ -181,6 +184,7 @@ def main():
 
             # model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")             # @ Zou: 重新load model_layerwise.pt参数，否则fastvit_quant的validate会出现time变大同时out of memory
             # model = model.to(device)
+            # model.model_quant()    
             # print('Validating layerwise quantization...')
             # val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
             #                                         criterion, device)

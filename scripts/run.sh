@@ -5,6 +5,7 @@ seed=0              # random seed
 model="deit_tiny"   # model flavor
 model="fastvit_sa12"
 mode="e2e"          # mode from main.py
+# mode="fq_vit"
 # mode="fp_no_quant"
 
 # specify # of bits for weights & activations ex: 3,4,8

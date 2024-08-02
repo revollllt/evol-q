@@ -248,6 +248,7 @@ class MHSA(nn.Module):                                    # ! Should be changed 
 
         # trick here to make q@k.t more stable
         attn = (q * self.scale) @ k.transpose(-2, -1)
+        # attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = self.qact2(attn)
         # attn = attn.softmax(dim=-1)                     # @ Zou: 此处的softmax还没进行量化
         attn = self.log_int_softmax(attn, self.qact2.quantizer.scale)    # @ Zou: 目前还没看这里的softmax是如何量化的
