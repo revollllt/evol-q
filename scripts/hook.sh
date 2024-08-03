@@ -2,7 +2,7 @@
 
 device=0            # CUDA device
 seed=0              # random seed
-model="deit_tiny"   # model flavor
+# model="deit_tiny"   # model flavor
 model="fastvit_sa12"
 # model="fastvit_t8"
 # model="fastvit_s12"
@@ -21,7 +21,7 @@ out_file=$output_folder/logs.txt
 mkdir -p $output_folder
 
 date
-CUDA_VISIBLE_DEVICES=$device python3 main.py \
+CUDA_VISIBLE_DEVICES=$device python3 hook_evaluation.py \
     $model ~/data/ImageNet --ptf \
     --mode ${mode} \
     --img_size 256 \

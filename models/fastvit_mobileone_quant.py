@@ -24,7 +24,8 @@ class SEBlock(nn.Module):
     https://arxiv.org/pdf/1709.01507.pdf
     """
 
-    def __init__(self, in_channels: int, rd_ratio: float = 0.0625) -> None:
+    def __init__(self, in_channels: int, rd_ratio: float = 0.0625,
+                 quant=False, calibrate=False, cfg=None) -> None:
         """Construct a Squeeze and Excite Module.
 
         Args:
@@ -32,19 +33,65 @@ class SEBlock(nn.Module):
             rd_ratio: Input channel reduction ratio.
         """
         super(SEBlock, self).__init__()
-        self.reduce = nn.Conv2d(
+        self.reduce = QConv2d(
             in_channels=in_channels,
             out_channels=int(in_channels * rd_ratio),
             kernel_size=1,
             stride=1,
             bias=True,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+            bcorr_weights=cfg.BCORR_W
         )
-        self.expand = nn.Conv2d(
+        self.qact1 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A
+        )
+        self.expand = QConv2d(
             in_channels=int(in_channels * rd_ratio),
             out_channels=in_channels,
             kernel_size=1,
             stride=1,
             bias=True,
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_W,
+            calibration_mode=cfg.CALIBRATION_MODE_W,
+            observer_str=cfg.OBSERVER_W,
+            quantizer_str=cfg.QUANTIZER_W,
+            bcorr_weights=cfg.BCORR_W
+        )
+        self.qact2 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A
+        )
+        self.qact3 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A
+        )
+        self.qact4 = QAct(
+            quant=quant,
+            calibrate=calibrate,
+            bit_type=cfg.BIT_TYPE_A,
+            calibration_mode=cfg.CALIBRATION_MODE_A,
+            observer_str=cfg.OBSERVER_A,
+            quantizer_str=cfg.QUANTIZER_A
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -53,10 +100,13 @@ class SEBlock(nn.Module):
         x = F.avg_pool2d(inputs, kernel_size=[h, w])     # @ Victor: after this avg_pool2d, the feature map's H x W will become 1 x 1
         x = self.reduce(x)                               # @ Victor: 1 x 1 Conv
         x = F.relu(x)
+        x = self.qact1(x)
         x = self.expand(x)                               # @ Victor: 1 x 1 Conv
+        x = self.qact2(x)
         x = torch.sigmoid(x)
+        x = self.qact3(x)
         x = x.view(-1, c, 1, 1)                          # @ Victor: 将权重重塑为原始输入特征图的通道数相同的形状，使其可以对每个通道进行广播乘法。
-        return inputs * x                                # @ Victor: 使用广播机制，将归一化的通道权重应用（乘法）到原始输入特征图的每个通道上。这个操作实质上是对原始特征图中每个通道的重要性进行动态调整，其中x是通过SE模块学到的每个通道的重要性权重。
+        return self.qact4(inputs * x)                                # @ Victor: 使用广播机制，将归一化的通道权重应用（乘法）到原始输入特征图的每个通道上。这个操作实质上是对原始特征图中每个通道的重要性进行动态调整，其中x是通过SE模块学到的每个通道的重要性权重。
 
 
 class MobileOneBlock(nn.Module):
@@ -117,7 +167,7 @@ class MobileOneBlock(nn.Module):
 
         # Check if SE-ReLU is requested
         if use_se:
-            self.se = SEBlock(out_channels)
+            self.se = SEBlock(out_channels, quant=quant, calibrate=calibrate, cfg=cfg)
         else:
             self.se = nn.Identity()
 

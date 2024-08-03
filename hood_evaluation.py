@@ -104,24 +104,7 @@ def main():
     model = str2model(args.model)(pretrained=True, cfg=cfg)                        # @ Victor: 导入pretrained模型
     model = model.to(device)                                                       # @ Victor: 将模块及其所有子模块的参数和缓冲区移动到指定的设备上（PyTorch）
 
-    # Note: Different models have different strategies of data preprocessing.
-    model_type = args.model.split('_')[0]
-
-    train_transform = build_transform(model_type)                                  # @ Victor: 见 utils.py
-    val_transform = build_transform(model_type)
-
-    # Data
-    traindir = os.path.join(args.data, 'val')                                      # @ Victor: 训练集   @ Zou: 先使用val替代train用作校准
-    valdir = os.path.join(args.data, 'val')                                        # @ Victor: 验证集
-
-    # val_dataset = datasets.ImageFolder(valdir, val_transform)
-    # val_loader = torch.utils.data.DataLoader(
-    #     val_dataset,
-    #     batch_size=args.val_batchsize,
-    #     shuffle=False,
-    #     num_workers=args.num_workers,
-    #     pin_memory=True,
-    # )
+    # register hooks
     
     dataset = create_dataset(                                                       # @ Zou: new val datasetm, the same as fastvit ml-fastvit/validate.py
         root=args.data,
@@ -141,7 +124,6 @@ def main():
     model.eval()                                                                   # @ Victor: 切换到 evaluate 模式
 
     # define loss function (criterion)
-    # criterion = nn.CrossEntropyLoss().to(device)                                   # @ Victor: 定义交叉熵损失函数并将其移动到指定的设备上
     criterion = nn.CrossEntropyLoss()
     if not args.mode == "fp_no_quant": #check if in a quantization mode            # @ Victor: 如果用 "fp_no_quant" 那就是非量化模式，否则就会进行量化
         # train_dataset = datasets.ImageFolder(traindir, train_transform)
@@ -157,14 +139,6 @@ def main():
             crop_pct=0.875,
             pin_memory=True
         )
-        # calib_loader = torch.utils.data.DataLoader(                                # @ Victor: 创建校准数据加载器
-        #     calib_dataset,                                                         # @ Victor: 需要用到校准数据集
-        #     batch_size=args.calib_batchsize,
-        #     shuffle=False,
-        #     num_workers=args.num_workers,
-        #     pin_memory=True,
-        #     drop_last=True,
-        # )
 
         if args.mode == "fq++" or args.mode == "fq_vit" or args.mode == "e2e":
             

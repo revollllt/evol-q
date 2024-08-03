@@ -8,8 +8,8 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from torch._six import inf
-
+# from torch._six import inf
+from torch import inf             #  @ Victor: torch 2.0 版本后没有这个._six
 
 class SmoothedValue(object):                                                     #  @ Victor: 用于在训练过程中追踪和展示损失、准确率等指标的平滑值和统计信息
     """Track a series of values and provide access to smoothed values over a

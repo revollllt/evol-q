@@ -1256,7 +1256,7 @@ class FastViT(BaseQuant):
 
 
 @register_model
-def fastvit_t8(pretrained=False, **kwargs):
+def fastvit_t8(pretrained=False, quant=False, calibrate=False, cfg=None, **kwargs):
     """Instantiate FastViT-T8 model variant."""
     layers = [2, 2, 4, 2]
     embed_dims = [48, 96, 192, 384]
@@ -1269,11 +1269,17 @@ def fastvit_t8(pretrained=False, **kwargs):
         embed_dims=embed_dims,
         mlp_ratios=mlp_ratios,
         downsamples=downsamples,
+        inference_mode=True,
+        quant=quant,
+        calibrate=calibrate,
+        cfg=cfg,
         **kwargs,
     )
     model.default_cfg = default_cfgs["fastvit_t"]
     if pretrained:
-        raise ValueError("Functionality not implemented.")
+        # raise ValueError("Functionality not implemented.")
+        checkpoint = '/home/zou/codes/ml-fastvit/weights/fastvit_t8_reparam.pth.tar'
+        load_checkpoint(model, checkpoint)
     return model
 
 
@@ -1300,7 +1306,7 @@ def fastvit_t12(pretrained=False, **kwargs):
 
 
 @register_model
-def fastvit_s12(pretrained=False, **kwargs):
+def fastvit_s12(pretrained=False, quant=False, calibrate=False, cfg=None, **kwargs):
     """Instantiate FastViT-S12 model variant."""
     layers = [2, 2, 6, 2]
     embed_dims = [64, 128, 256, 512]
@@ -1313,11 +1319,17 @@ def fastvit_s12(pretrained=False, **kwargs):
         embed_dims=embed_dims,
         mlp_ratios=mlp_ratios,
         downsamples=downsamples,
+        inference_mode=True,
+        quant=quant,
+        calibrate=calibrate,
+        cfg=cfg,
         **kwargs,
     )
     model.default_cfg = default_cfgs["fastvit_s"]
     if pretrained:
-        raise ValueError("Functionality not implemented.")
+        # raise ValueError("Functionality not implemented.")
+        checkpoint = '/home/zou/codes/ml-fastvit/weights/fastvit_s12_reparam.pth.tar'
+        load_checkpoint(model, checkpoint)
     return model
 
 # @ Zou: select fastvit_sa12 as an example
@@ -1330,6 +1342,8 @@ def fastvit_sa12(pretrained=False, quant=False, calibrate=False, cfg=None, **kwa
     downsamples = [True, True, True, True]
     pos_embs = [None, None, None, partial(RepCPE, spatial_shape=(7, 7))]
     token_mixers = ("repmixer", "repmixer", "repmixer", "attention")
+    # stem, basic_blocks, conv_exp, head   # @Zou: ablation study on each module
+    # quant = [False, [False, False, False, False], False, False]
     model = FastViT(
         layers,
         token_mixers=token_mixers,
@@ -1347,6 +1361,7 @@ def fastvit_sa12(pretrained=False, quant=False, calibrate=False, cfg=None, **kwa
     if pretrained:
         # raise ValueError("Functionality not implemented.")
         checkpoint = '/home/zou/codes/ml-fastvit/weights/fastvit_sa12_reparam.pth.tar'
+        # checkpoint = '/home/victorchan/research/fastvit_test/ml-fastvit/pytorch_checkpoint/NoKD/fastvit_sa12_reparam.pth.tar'
         load_checkpoint(model, checkpoint)
         # model.load_state_dict(checkpoint['state_dict'])
         # model_inf = reparameterize_model(model)
