@@ -13,6 +13,8 @@ from timm.data import (
 )
 # @Zou ----------------------------------------------------------------------------------#
 
+from hooks.hooks import *
+
 parser = argparse.ArgumentParser(description='CPT-V')
 
 parser.add_argument('model',                                                                                                 # @ Victor: 似乎可以自己加入新模型
@@ -101,10 +103,16 @@ def main():
         from config import Config
 
     cfg = Config(args)
-    model = str2model(args.model)(pretrained=True, cfg=cfg)                        # @ Victor: 导入pretrained模型
-    model = model.to(device)                                                       # @ Victor: 将模块及其所有子模块的参数和缓冲区移动到指定的设备上（PyTorch）
+    model_quant = str2model(args.model)(pretrained=True, cfg=cfg)                        # @ Victor: 导入pretrained模型
+    model_quant = model_quant.to(device)                                                       # @ Victor: 将模块及其所有子模块的参数和缓冲区移动到指定的设备上（PyTorch）
 
-    # register hooks
+    model_without_quant = str2model(args.model)(pretrained=True, cfg=cfg)
+    model_without_quant = model_without_quant.to(device)
+    
+    
+    # model.stem.register_forward_hook(stem_hook_quant.hook_fn)
+    # model_without_quant.stem.register_forward_hook(stem_hook_without_quant.hook_fn)
+    
     
     dataset = create_dataset(                                                       # @ Zou: new val datasetm, the same as fastvit ml-fastvit/validate.py
         root=args.data,
@@ -121,7 +129,7 @@ def main():
         pin_memory=True
     )
     # switch to evaluate mode
-    model.eval()                                                                   # @ Victor: 切换到 evaluate 模式
+    model_quant.eval()                                                                   # @ Victor: 切换到 evaluate 模式
 
     # define loss function (criterion)
     criterion = nn.CrossEntropyLoss()
@@ -142,7 +150,7 @@ def main():
 
         if args.mode == "fq++" or args.mode == "fq_vit" or args.mode == "e2e":
             
-            model.model_open_calibrate()                                           # @ Victor: 开启模型的校准模式
+            model_quant.model_open_calibrate()                                           # @ Victor: 开启模型的校准模式
             with torch.no_grad():                                                  # @ Victor: 无梯度计算校准。（禁用梯度计算，加速推理过程，节省显存）
 
                 for i, (image, target) in enumerate(calib_loader):                 # @ Victor: 遍历 calib_loader，将图像数据移动到指定设备，并输入模型进行前向传播
@@ -150,41 +158,37 @@ def main():
                     if i == len(calib_loader) - 1:                                 # @ Victor: 如果是最后一个批次，则使用 OMSE 方法计算最小量化误差
                         # This is used for OMSE method to
                         # calculate minimum quantization error
-                        model.model_open_last_calibrate()                          # @ Victor: 函数定义见 base_quant.py 和 swin_quant.py
-                    model(image)
-            model.model_close_calibrate()                                          # @ Victor: 关闭模型的校准模式
+                        model_quant.model_open_last_calibrate()                          # @ Victor: 函数定义见 base_quant.py 和 swin_quant.py
+                    model_quant(image)
+            model_quant.model_close_calibrate()                                          # @ Victor: 关闭模型的校准模式
             
-            print("Saving Model... ")
-            torch.save(model, args.save_folder+ "/model_layerwise.pt")             # @ Victor: 保存校准后的模型
-            model.model_quant()                                                    # @ Victor: 函数定义见 base_quant.py 和 swin_quant.py
+            # 测试单个module的量化
+            # quant_stem(model_quant)                                                     # @ Victor: 函数定义见 hooks/hooks.py
+      
 
-            # model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")             # @ Zou: 重新load model_layerwise.pt参数，否则fastvit_quant的validate会出现time变大同时out of memory
-            # model = model.to(device)
-            # model.model_quant()    
             print('Validating layerwise quantization...')
-            val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
+            val_loss, val_prec1, val_prec5 = validate_with_hook(args, val_loader, model_quant, model_without_quant,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
                                                     criterion, device)
-            with open(args.save_folder+"/layerwise.txt", "a") as f:
-                f.write(str(val_prec1)+"\n")
+
                 
-        if args.mode == "evolq" or args.mode == "e2e":
+    #     if args.mode == "evolq" or args.mode == "e2e":
 
-            print("Loading Model...")
-            model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")   # MARK: 加载已经逐层量化和校准后的模型作为基础
-            optim = JointQuantization(model, calib_loader, device, args, val_loader=val_loader)    # @ Victor: 联合量化见 joint_evol_opt.py
-            model = optim.opt()                                                                    # @ Victor: 实际运行联合量化
+    #         print("Loading Model...")
+    #         model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")   # MARK: 加载已经逐层量化和校准后的模型作为基础
+    #         optim = JointQuantization(model, calib_loader, device, args, val_loader=val_loader)    # @ Victor: 联合量化见 joint_evol_opt.py
+    #         model = optim.opt()                                                                    # @ Victor: 实际运行联合量化
 
-            print('Validating Evol-Q optimization...')
-            model.model_quant()                                                    # @ Victor: 打开量化开关。函数定义见 base_quant.py 和 swin_quant.py # @ Zou: new calib dataset
-            val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型
-                                                    criterion, device)
-            with open(args.save_folder+"/evolq.txt", "w") as f:
-                f.write(str(val_prec1)+"\n")
-    else:
+    #         print('Validating Evol-Q optimization...')
+    #         model.model_quant()                                                    # @ Victor: 打开量化开关。函数定义见 base_quant.py 和 swin_quant.py # @ Zou: new calib dataset
+    #         val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型
+    #                                                 criterion, device)
+    #         with open(args.save_folder+"/evolq.txt", "w") as f:
+    #             f.write(str(val_prec1)+"\n")
+    # else:
 
-        print('Validating full precision...')
-        val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,         # @ Victor: 验证全精度的模型
-                                                  criterion, device)
+    #     print('Validating full precision...')
+    #     val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,         # @ Victor: 验证全精度的模型
+    #                                               criterion, device)
 
 if __name__ == '__main__':
     main()

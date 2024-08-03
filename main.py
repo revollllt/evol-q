@@ -183,10 +183,7 @@ def main():
             print("Saving Model... ")
             torch.save(model, args.save_folder+ "/model_layerwise.pt")             # @ Victor: 保存校准后的模型
             model.model_quant()                                                    # @ Victor: 函数定义见 base_quant.py 和 swin_quant.py
-
-            # model = torch.load(args.save_folder+"/model_layerwise.pt").to("cpu")             # @ Zou: 重新load model_layerwise.pt参数，否则fastvit_quant的validate会出现time变大同时out of memory
-            # model = model.to(device)
-            # model.model_quant()    
+  
             print('Validating layerwise quantization...')
             val_loss, val_prec1, val_prec5 = validate(args, val_loader, model,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
                                                     criterion, device)
