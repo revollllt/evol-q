@@ -12,15 +12,19 @@ from models import *
 
 class Hook:
     def __init__(self):
-        self.output = None
-        # self.outputs = {}
+        # self.output = None
+        self.outputs = {}
 
     def hook_fn(self, module, input, output):
-        self.output = output.detach()  # 保存输出特征图
-        # key = f"{module.__class__.__name__}_{id(module)}"
-        # self.outputs[key] = output.detach()  # @ Zou: 使用字典保存不同模块的输出特征图
+        # self.output = output.detach()  # 保存输出特征图
+        key = f"{module.__class__.__name__}_{id(module)}" # @ Zou: 添加id防止FastViT.network中有多个相同的模块
+        self.outputs[key] = output.detach()  # @ Zou: 使用字典保存不同模块的输出特征图
 
-
+class Cosine_Similarity_Container:
+    def __init__(self):
+        self.cosine_similarities = {}
+    
+    
 
 def model_quant(model_quant):                                                 # @ Victor: 其实就是把所有 Q 字头的层的 "quant" 参数打开
     for m in model_quant.modules():
@@ -43,7 +47,7 @@ def quant_stem(model_quant):
     #         print(f"patch_embed MobileOneBlock {i} quant status: {module.quant}")
 
     
-def quant_network(model_quant, quant_layers=[False, False, False, False, False, False, False, False]):
+def quant_network(model_quant, quant_layers=[False, False, False, False, False, False, False, False]): # @ Zou: len(quant_layers) is 8
     for i, module in enumerate(model_quant.network):
         # print(f"network {i} module: {type(module).__name__}")
         # network 0 module: Sequential
@@ -73,21 +77,129 @@ def quant_head(model_quant):
     model_quant.qact_out.quant = True
     # model_quant.qact_out.register_forward_hook(hook.hook_fn)
 
-def hook_stem(model_quant, model_without_quant, hook_quant, hook_without_quant):
+
+# @ Zou: 将hook按照FastViT的模块分为stem, network, conv_exp, head四个大部分
+def hook_stem(model_quant, model_without_quant): # @ Zou: Create hooks for stem and return them
+    hook_quant = Hook()
+    hook_without_quant = Hook()
     model_quant.qact_embed.register_forward_hook(hook_quant.hook_fn)
     model_without_quant.qact_embed.register_forward_hook(hook_without_quant.hook_fn)
+    return hook_quant, hook_without_quant
     
-def hook_network(model_quant, model_without_quant, hook_quant, hook_without_quant):  # @ Zou: 待更新hook nn.ModuleList中的模块
-    model_quant.network.register_forward_hook(hook_quant.hook_fn)
-    model_without_quant.network.register_forward_hook(hook_without_quant.hook_fn)
+def hook_network(model_quant, model_without_quant):  # @ Zou: 对FastViT的network部分中ModuleList的8个小部分，每个部分创建一个hook
+    hook_quant = Hook()
+    hook_without_quant = Hook()
+    for i, module in enumerate(model_quant.network):
+        model_quant.network[i].register_forward_hook(hook_quant.hook_fn)
+        model_without_quant.network[i].register_forward_hook(hook_without_quant.hook_fn)
+    return hook_quant, hook_without_quant
     
-def hook_conv_exp(model_quant, model_without_quant, hook_quant, hook_without_quant):
+def hook_conv_exp(model_quant, model_without_quant):
+    hook_quant = Hook()
+    hook_without_quant = Hook()
     model_quant.conv_exp.register_forward_hook(hook_quant.hook_fn)
     model_without_quant.conv_exp.register_forward_hook(hook_without_quant.hook_fn)
+    return hook_quant, hook_without_quant
     
-def hook_head(model_quant, model_without_quant, hook_quant, hook_without_quant):
+def hook_head(model_quant, model_without_quant):
+    hook_quant = Hook()
+    hook_without_quant = Hook()
     model_quant.qact_out.register_forward_hook(hook_quant.hook_fn)
     model_without_quant.qact_out.register_forward_hook(hook_without_quant.hook_fn)
+    return hook_quant, hook_without_quant
+
+def hook_all(model_quant, model_without_quant):
+    stem_hook_quant, stem_hook_without_quant = hook_stem(model_quant, model_without_quant)
+    network_hook_quant, network_hook_without_quant = hook_network(model_quant, model_without_quant)
+    conv_exp_hook_quant, conv_exp_hook_without_quant = hook_conv_exp(model_quant, model_without_quant)
+    head_hook_quant, head_hook_without_quant = hook_head(model_quant, model_without_quant)
+    return stem_hook_quant, stem_hook_without_quant, network_hook_quant, network_hook_without_quant, \
+        conv_exp_hook_quant, conv_exp_hook_without_quant, head_hook_quant, head_hook_without_quant
+
+
+def print_hooks_infor(stem_hook_quant=None, stem_hook_without_quant=None, 
+                       network_hook_quant=None, network_hook_without_quant=None,
+                       conv_exp_hook_quant=None, conv_exp_hook_without_quant=None,
+                       head_hook_quant=None, head_hook_without_quant=None):
+    if stem_hook_quant:
+        for key, value in stem_hook_quant.outputs.items():
+            print(f"[stem_hook_quant] Module: {key}, Output shape: {value.shape}")
+    if stem_hook_without_quant:
+        for key, value in stem_hook_without_quant.outputs.items():
+            print(f"[stem_hook_without_quant] Module: {key}, Output shape: {value.shape}")
+    if network_hook_quant:
+        for i, (key, value) in enumerate(network_hook_quant.outputs.items()):
+            print(f"[network_hook_quant_{i}] Module: {key}, Output shape: {value.shape}")
+    if network_hook_without_quant:
+        for i, (key, value) in enumerate(network_hook_without_quant.outputs.items()):
+            print(f"[network_hook_without_quant_{i}] Module: {key}, Output shape: {value.shape}")
+    if conv_exp_hook_quant:
+        for key, value in conv_exp_hook_quant.outputs.items():
+            print(f"[conv_exp_hook_quant] Module: {key}, Output shape: {value.shape}")
+    if conv_exp_hook_without_quant:
+        for key, value in conv_exp_hook_without_quant.outputs.items():
+            print(f"[conv_exp_hook_without_quant] Module: {key}, Output shape: {value.shape}")
+    if head_hook_quant:
+        for key, value in head_hook_quant.outputs.items():
+            print(f"[head_hook_quant] Module: {key}, Output shape: {value.shape}")
+    if head_hook_without_quant:
+        for key, value in head_hook_without_quant.outputs.items():
+            print(f"[head_hook_without_quant] Module: {key}, Output shape: {value.shape}")
+
+
+def calculate_cosine_similarity(hook_quant, hook_without_quant):
+    feature_map_quant=[]
+    feature_map_quant_flat=[]
+    feature_map_without_quant=[]
+    feature_map_without_quant_flat=[]
+    
+    for i, (key, value) in enumerate(hook_quant.outputs.items()):
+        feature_map_quant.append(value)
+        feature_map_quant_flat.append(feature_map_quant[i].view(feature_map_quant[i].size(0), -1))
+    for i, (key, value) in enumerate(hook_without_quant.outputs.items()):
+        feature_map_without_quant.append(value)
+        feature_map_without_quant_flat.append(feature_map_without_quant[i].view(feature_map_without_quant[i].size(0), -1))
+    
+    cosine_similarity = [] if len(feature_map_quant) > 1 else None
+    if len(feature_map_quant) > 1:
+        for i in range(len(feature_map_quant_flat)):
+            cosine_similarity.append(F.cosine_similarity(feature_map_quant_flat[i], feature_map_without_quant_flat[i], dim=1))
+    else:
+        # print(feature_map_quant_flat[0].shape, feature_map_without_quant_flat[0].shape)
+        cosine_similarity = F.cosine_similarity(feature_map_quant_flat[0], feature_map_without_quant_flat[0], dim=1)
+        # print(cosine_similarity)
+    return cosine_similarity
+        
+
+def print_cosine_similarity(cosine_similarities_dict):
+    for key, value in cosine_similarities_dict.items():
+        if key == "network":
+            for i, item in enumerate(value):
+                print(f"[{key}_{i}] Cosine Similarity: {item.mean().item()}")
+        else:
+            print(f"[{key}] Cosine Similarity: {value.mean().item()}")
+    
+
+
+def calculate_cosine_similarity_dict(stem_hook_quant=None, stem_hook_without_quant=None,  
+                                network_hook_quant=None, network_hook_without_quant=None,
+                                conv_exp_hook_quant=None, conv_exp_hook_without_quant=None,
+                                head_hook_quant=None, head_hook_without_quant=None):
+    '''
+    
+    return: a dictionary of cosine similarity of different parts of the model
+    '''
+    cosine_similarity_dict = {}
+    if stem_hook_quant and stem_hook_without_quant:
+        cosine_similarity_dict["stem"] = calculate_cosine_similarity(stem_hook_quant, stem_hook_without_quant)
+    if network_hook_quant and network_hook_without_quant:
+        cosine_similarity_dict["network"] = calculate_cosine_similarity(network_hook_quant, network_hook_without_quant)
+    if conv_exp_hook_quant and conv_exp_hook_without_quant:
+        cosine_similarity_dict["conv_exp"] = calculate_cosine_similarity(conv_exp_hook_quant, conv_exp_hook_without_quant)
+    if head_hook_quant and head_hook_without_quant:
+        cosine_similarity_dict["head"] = calculate_cosine_similarity(head_hook_quant, head_hook_without_quant)
+    return cosine_similarity_dict
+
 
 def validate_with_hook(args, val_loader, model_quant, model_without_quant, criterion, device):
     batch_time = AverageMeter()
@@ -103,8 +215,7 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
 
     # stem_hook_quant = Hook()
     # stem_hook_without_quant = Hook()
-    hook_quant = Hook()
-    hook_without_quant = Hook()
+
     # @ Zou: place to hook and quantize modules
     
     quant_network(model_quant, quant_layers=[True, True, True, True, True, True, True, True])
@@ -119,33 +230,28 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
         target = target.to(device)
 
         with torch.no_grad():
-            
             # model_quant.patch_embed.register_forward_hook(stem_hook_quant.hook_fn)
             # model_without_quant.patch_embed.register_forward_hook(stem_hook_without_quant.hook_fn)
-            # hook_network(model_quant, model_without_quant, hook_quant, hook_without_quant)
-            model_quant.patch_embed.register_forward_hook(hook_quant.hook_fn)
-            model_without_quant.patch_embed.register_forward_hook(hook_without_quant.hook_fn)
-            
+            stem_hook_quant, stem_hook_without_quant = hook_stem(model_quant, model_without_quant)
+            network_hook_quant, network_hook_without_quant = hook_network(model_quant, model_without_quant)
+
             output_quant = model_quant(data)
             output_without_quant = model_without_quant(data)
             
-            print(hook_quant.output)
-            print(hook_without_quant.output)
-            # for key, value in hook_quant.outputs.items():
-            #     print(f"Module: {key}, Output shape: {value.shape}")
-            # for key, value in hook_without_quant.outputs.items():
-            #     print(f"Module: {key}, Output shape: {value.shape}")
+            print_hooks_infor(stem_hook_quant=stem_hook_quant, stem_hook_without_quant=stem_hook_without_quant,
+                              network_hook_quant=network_hook_quant, network_hook_without_quant=network_hook_without_quant)
             
-            break
             # stem_feature_map_quant = stem_hook_quant.output
             # stem_feature_map_withou_quant = stem_hook_without_quant.output
-            
             # stem_feature_map_quant_flat = stem_feature_map_quant.view(stem_feature_map_quant.size(0), -1)
             # stem_hook_without_quant_flat = stem_feature_map_withou_quant.view(stem_feature_map_withou_quant.size(0), -1)
-            
             # cosine_similarity = F.cosine_similarity(stem_feature_map_quant_flat, stem_hook_without_quant_flat, dim=1)
-            # data_cpu = data.cpu()
-            # imshow(data_cpu)
+            cosine_similarities_dict = calculate_cosine_similarity_dict(stem_hook_quant=stem_hook_quant, stem_hook_without_quant=stem_hook_without_quant,
+                                        network_hook_quant=network_hook_quant, network_hook_without_quant=network_hook_without_quant)
+
+            print_cosine_similarity(cosine_similarities_dict)
+            
+            break
             
         loss_quant = criterion(output_quant, target)
         loss_without_quant = criterion(output_without_quant, target)
