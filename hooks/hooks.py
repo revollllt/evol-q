@@ -24,7 +24,53 @@ class Cosine_Similarity_Container:
     def __init__(self):
         self.cosine_similarities = {}
     
+def print_quantization_module_params(m, str, path, f): 
+    if type(m) in [QConv2d, QLinear]:
+        if m.bias is not None:
+            print(str + f"Module: {m.__class__.__name__}, Shape: weight: {m.weight.shape}, bias: {m.bias.shape}\n" +
+                    f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                    f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}")
+            f.write(str + f"Module: {m.__class__.__name__}, Shape: weight: {m.weight.shape}, bias: {m.bias.shape}\n" +
+                    f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                    f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}\n")
+        else:
+            print(str + f"Module: {m.__class__.__name__}, Shape: weight: {m.weight.shape}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}")
+            f.write(str + f"Module: {m.__class__.__name__}, Shape: weight: {m.weight.shape}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}\n")
+    elif type(m) in [QAct]:
+        print(str + f"Module: {m.__class__.__name__}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}")
+        f.write(str + f"Module: {m.__class__.__name__}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}\n")
+    elif type(m) in [QIntLayerNorm]:
+        print(str + f"Module: {m.__class__.__name__}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}")
+        f.write(str + f"Module: {m.__class__.__name__}\n" +
+                f"Scale: {m.quantizer.scale.detach()}, Zero Point: {m.quantizer.zero_point.detach()}\n" +
+                f"Max: {m.quantizer.max_val.detach()}, Min: {m.quantizer.min_val.detach()}\n")
+                    
     
+def print_quantization_params(model_calibrated, path):
+    with open(path, 'w') as f:
+        for m in model_calibrated.patch_embed.modules():
+            str = "#------[stem]------#\n"
+            print_quantization_module_params(m, str, path, f)
+        for i, module in enumerate(model_calibrated.network):
+            for m in module.modules():
+                str = f"#------[network_{i}]------#\n"
+                print_quantization_module_params(m, str, path, f)
+        for m in model_calibrated.conv_exp.modules():
+            str = "#------[conv_exp]------#\n"
+            print_quantization_module_params(m, str, path, f)
+        for m in model_calibrated.head.modules():
+            str = "#------[head]------#\n"
+            print_quantization_module_params(m, str, path, f)
 
 def model_quant(model_quant):                                                 # @ Victor: 其实就是把所有 Q 字头的层的 "quant" 参数打开
     for m in model_quant.modules():

@@ -30,9 +30,11 @@ class UniformQuantizer(BaseQuantizer):                                          
         super(UniformQuantizer, self).__init__(bit_type, observer, module_type, bcorr_weights)
         self.scale = None
         self.zero_point = None
+        self.max_val = None
+        self.min_val = None
 
     def update_quantization_params(self, *args, **kwargs):                        # @ Victor: 更新量化参数
-        self.scale, self.zero_point = self.observer.get_quantization_params(
+        self.scale, self.zero_point, self.max_val, self.min_val = self.observer.get_quantization_params(
             *args, **kwargs)
         self.scale = torch.nn.Parameter(self.scale, requires_grad=True)
 
@@ -67,3 +69,10 @@ class UniformQuantizer(BaseQuantizer):                                          
         zero_point = zero_point.reshape(range_shape)
         outputs = (inputs - zero_point) * scale
         return outputs
+    
+    def print_quantization_params(self):
+        if self.max_val is not None and self.min_val is not None and self.scale is not None and self.zero_point is not None:
+            print(f'Max: {self.max_val}, Min: {self.min_val}\n' +
+                  f'Scale: {self.scale}, Zero Point: {self.zero_point}')
+        else:
+            print('Quantization parameters are not available yet. You need to calibrate the observer first.')

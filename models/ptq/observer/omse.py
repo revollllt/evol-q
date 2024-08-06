@@ -74,4 +74,4 @@ class OmseObserver(BaseObserver):
                 self.min_val = new_min
                 scale = new_scale
                 zero_point = new_zero_point
-        return scale, zero_point
+        return scale, zero_point, self.max_val, self.min_val

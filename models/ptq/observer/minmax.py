@@ -51,4 +51,4 @@ class MinmaxObserver(BaseObserver):
             zero_point = qmin - torch.round(min_val / scale)
             zero_point.clamp_(qmin, qmax)
 
-        return scale, zero_point
+        return scale, zero_point, self.max_val, self.min_val

@@ -163,12 +163,13 @@ def main():
             model_quant.model_close_calibrate()                                          # @ Victor: 关闭模型的校准模式
             
             # 测试单个module的量化
-            # quant_stem(model_quant)                                                     # @ Victor: 函数定义见 hooks/hooks.py
-      
+            # quant_stem(model_quant)                                                     # @ Zou: 函数定义见 hooks/hooks.py
+            print_quantization_params(model_quant, args.save_folder+'/sa12_quantization_params.txt')                                       # @ Zou: 函数定义见 hooks/hooks.py
+            
 
-            print('Validating layerwise quantization...')
-            val_loss, val_prec1, val_prec5 = validate_with_hook(args, val_loader, model_quant, model_without_quant,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
-                                                    criterion, device)
+            # print('Validating layerwise quantization...')
+            # val_loss, val_prec1, val_prec5 = validate_with_hook(args, val_loader, model_quant, model_without_quant,     # @ Victor: 验证量化后的模型  # @ Zou: fastvit此处会出现time变大问题导致out of memory
+            #                                         criterion, device)
 
                 
     #     if args.mode == "evolq" or args.mode == "e2e":
