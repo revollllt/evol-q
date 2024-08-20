@@ -1631,6 +1631,7 @@ class FastViT(BaseQuant):
         quant=False,
         calibrate=False,
         cfg=None,
+        input_quant=False,
         **kwargs,
     ) -> None:
 
@@ -1643,6 +1644,14 @@ class FastViT(BaseQuant):
         if pos_embs is None:
             pos_embs = [None] * len(layers)
 
+        self.input_quant = input_quant
+        if input_quant:
+            self.qact_input = QAct(quant=quant,
+                                   calibrate=calibrate,
+                                   bit_type=cfg.BIT_TYPE_A,
+                                   calibration_mode=cfg.CALIBRATION_MODE_A,
+                                   observer_str=cfg.OBSERVER_A,
+                                   quantizer_str=cfg.QUANTIZER_A)
         # Convolutional stem
         self.patch_embed = convolutional_stem_q(3, embed_dims[0], inference_mode,
                                               quant=quant, calibrate=calibrate, cfg=cfg)
@@ -1813,6 +1822,8 @@ class FastViT(BaseQuant):
             missing_keys, unexpected_keys = self.load_state_dict(state_dict, False)
 
     def forward_embeddings(self, x: torch.Tensor) -> torch.Tensor:
+        if self.input_quant:
+            x = self.qact_input(x)
         x = self.patch_embed(x)
         x = self.qact_embed(x)
         return x
@@ -1936,6 +1947,7 @@ def fastvit_sa12(pretrained=False, quant=False, calibrate=False, cfg=None, **kwa
         quant=quant,
         calibrate=calibrate,
         cfg=cfg,
+        input_quant=True,
         **kwargs,
     )
     model.default_cfg = default_cfgs["fastvit_s"]
