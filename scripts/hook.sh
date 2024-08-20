@@ -31,7 +31,7 @@ CUDA_VISIBLE_DEVICES=$device python3 hook_evaluation.py \
     --quant-method omse \
     --bias-corr \
     --save_folder $output_folder \
-    --val-batchsize 4 \
+    --val-batchsize 16 \
     # 2>&1 | tee -a $out_file # append to output folder
 
 date

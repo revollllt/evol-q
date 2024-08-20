@@ -274,7 +274,7 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
     # stem_hook_without_quant = Hook()
 
     # @ Zou: place to hook and quantize modules
-    quant_param = [False, [True, True, True, True, True, True, True, True], False, False] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
+    quant_param = [True, [True, True, True, True, True, True, True, True], True, True] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
     quant_stem(model_quant, quant=quant_param[0])
     quant_network(model_quant, quant_layers=quant_param[1])
     quant_conv_exp(model_quant, quant=quant_param[2])
@@ -282,6 +282,12 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
     # switch to evaluate mode
     model_quant.eval()
     model_without_quant.eval()
+    
+    # @ Zou: hook selected modules
+    stem_hook_quant, stem_hook_without_quant = hook_stem(model_quant, model_without_quant)
+    network_hook_quant, network_hook_without_quant = hook_network(model_quant, model_without_quant)
+    conv_exp_hook_quant, conv_exp_hook_without_quant = hook_conv_exp(model_quant, model_without_quant)
+    head_hook_quant, head_hook_without_quant = hook_head(model_quant, model_without_quant)
 
     val_start_time = end = time.time()
     loop = tqdm(enumerate(val_loader), leave=True, total=len(val_loader))
@@ -290,12 +296,6 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
         target = target.to(device)
 
         with torch.no_grad():
-            # @ Zou: hook selected modules
-            stem_hook_quant, stem_hook_without_quant = hook_stem(model_quant, model_without_quant)
-            network_hook_quant, network_hook_without_quant = hook_network(model_quant, model_without_quant)
-            conv_exp_hook_quant, conv_exp_hook_without_quant = hook_conv_exp(model_quant, model_without_quant)
-            head_hook_quant, head_hook_without_quant = hook_head(model_quant, model_without_quant)
-
             output_quant = model_quant(data)
             output_without_quant = model_without_quant(data)
             
@@ -378,7 +378,8 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
             f'Prec@1 ({top1_without_quant.avg:.3f})  ' + 
             f'Prec@5 ({top5_without_quant.avg:.3f})  ' +
             f'Prec@1_err ({top1_errors.avg:.3f})  ' +
-            f'Prec@5_err ({top5_errors.avg:.3f})\n' +
-            str_cosine_similarities)
+            f'Prec@5_err ({top5_errors.avg:.3f})\n'
+            +str_cosine_similarities
+            )
 
     return all_reduce_mean(losses_quant.avg), all_reduce_mean(top1_quant.avg), all_reduce_mean(top5_quant.avg)
