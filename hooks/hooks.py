@@ -87,7 +87,7 @@ def quant_stem(model_quant, quant=True):
     for i, module in enumerate(model_quant.patch_embed.modules()):
         # if isinstance(module, MobileOneBlock):
         #     module.quant = True
-        print(f"patch_embed {i} module: {type(module).__name__}")
+        # print(f"patch_embed {i} module: {type(module).__name__}")
         if type(module) in [QConv2d, QLinear, QAct, QIntSoftmax]:
             # module.quant = quant    # @ Zou: 打开所有stem层的quant参数
             # if i == 4 or i == 6:    # @ Zou: first MobileOneBlock： 3x3 Conv, S=2
@@ -114,9 +114,18 @@ def quant_network(model_quant, quant_layers=[False, False, False, False, False, 
         # network 6 module: RepCPE       # @ Zou: stage 4 
         # network 7 module: Sequential   # @ Zou: stage 4
         if quant_layers[i]:
-            for m in module.modules():
+            for j, m in enumerate(module.modules()):
+                print(f"network {i} module {j} module: {type(m).__name__}")
                 if type(m) in [QConv2d, QLinear, QAct, QIntSoftmax]:
-                    m.quant = True
+                    # m.quant = True
+                    if i == 1:  # @ Zou: Network_1(PatchEmbed)
+                        # if j == 4 or j == 6:  # @ Zou: ReparamLargeKernelConv: 7x7 DWConv, S=2
+                        if j == 11 or j == 13:  # @ Zou: MobileOneBlock: 1x1 Conv, S=1
+                            m.quant = True
+                    else:
+                        m.quant = True
+                    print(f"network {i} module {j} module: {type(m).__name__}, quant status: {m.quant}")
+                        
 
 def quant_conv_exp(model_quant, quant=True):
     for module in model_quant.conv_exp.modules():
@@ -283,7 +292,7 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
     # stem_hook_without_quant = Hook()
 
     # @ Zou: place to hook and quantize modules
-    quant_param = [True, [False, False, False, False, False, False, False, False], False, False] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
+    quant_param = [False, [False, True, False, False, False, False, False, False], False, False] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
     # quant_input(model_quant, quant=quant_param[0])
     quant_stem(model_quant, quant=quant_param[0])
     quant_network(model_quant, quant_layers=quant_param[1])
