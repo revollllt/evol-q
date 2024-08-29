@@ -80,12 +80,21 @@ def model_quant(model_quant):                                                 # 
             if type(m) in [QIntLayerNorm]:
                 m.mode = 'int'
 
+def quant_input(model_quant, quant=True):
+    model_quant.qact_input.quant = quant
+
 def quant_stem(model_quant, quant=True):
-    for module in model_quant.patch_embed.modules():
+    for i, module in enumerate(model_quant.patch_embed.modules()):
         # if isinstance(module, MobileOneBlock):
         #     module.quant = True
+        print(f"patch_embed {i} module: {type(module).__name__}")
         if type(module) in [QConv2d, QLinear, QAct, QIntSoftmax]:
+            # module.quant = quant    # @ Zou: 打开所有stem层的quant参数
+            # if i == 4 or i == 6:    # @ Zou: first MobileOneBlock： 3x3 Conv, S=2
+            # if i == 10 or i == 12:  # @ Zou: second MobileOneBlock: 3x3 DWConv, S=2
+            if i == 16 or i == 18:  # @ Zou: third MobileOneBlock: 1x1 Conv, S=1
                 module.quant = quant
+            print(f"patch_embed {i} module: {type(module).__name__}, quant status: {module.quant}")
     model_quant.qact_embed.quant = quant
     # model_quant.qact_embed.register_forward_hook(hook.hook_fn)
     # for i, module in enumerate(model_quant.patch_embed):
@@ -274,7 +283,8 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
     # stem_hook_without_quant = Hook()
 
     # @ Zou: place to hook and quantize modules
-    quant_param = [True, [True, True, True, True, True, True, True, True], True, True] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
+    quant_param = [True, [False, False, False, False, False, False, False, False], False, False] # @ Zou: stem, network, conv_exp, head的量化情况，后续可以改成从args中读取
+    # quant_input(model_quant, quant=quant_param[0])
     quant_stem(model_quant, quant=quant_param[0])
     quant_network(model_quant, quant_layers=quant_param[1])
     quant_conv_exp(model_quant, quant=quant_param[2])
@@ -352,7 +362,7 @@ def validate_with_hook(args, val_loader, model_quant, model_without_quant, crite
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % 100 == 0:   # @ Zou: 打印cosine similarity
+        if i % 300 == 0:   # @ Zou: 打印cosine similarity
             loop.write(f"{i}/{len(val_loader)} " + str_cosine_similarities)
 
 
